@@ -90,6 +90,7 @@ HOST_GO_TMP = $(@D)/host-go-tmp
 define HOST_GO_BUILD_CMDS
 	cd $(@D)/src && \
 		$(HOST_GO_MAKE_ENV) $(HOST_GO_HOST_CC) CGO_ENABLED=0 ./make.bash
+	if [ -d "$(HOST_GO_TMP)" ]; then rm -rf $(HOST_GO_TMP); fi
 	mkdir -p $(HOST_GO_TMP)
 	mv $(@D)/pkg/tool $(HOST_GO_TMP)/
 	mv $(@D)/bin/ $(HOST_GO_TMP)/
