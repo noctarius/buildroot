@@ -1,0 +1,10 @@
+#!/bin/sh
+echo "This program will configure the wifi setup"
+read -p "SSID: " ssid
+read -sp "Preshared-Key: " psk
+
+cp /etc/wpa_supplicant.conf.tmpl /media/wpa_supplicant.conf
+sed -i -e "s/%SSID%/${ssid}/g" /media/wpa_supplicant.conf
+sed -i -e "s/%PSK%/${psk}/g" /media/wpa_supplicant.conf
+
+/etc/init.d/S98_wlan

@@ -1,0 +1,1 @@
+source "$BR2_EXTERNAL_FANBOY_PATH/package/fanboy/Config.in"

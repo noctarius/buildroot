@@ -1,0 +1,5 @@
+#!/bin/sh
+
+/bin/gridfan -d /dev/ttyACM0 init
+/bin/gridfan -d /dev/ttyACM0 sync
+/bin/gridfan -d /dev/ttyACM0 set fans all speed off
