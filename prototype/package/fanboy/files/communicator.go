@@ -48,6 +48,7 @@ type communicator struct {
 
 func (c *communicator) start() {
 	c.init()
+	c.setSpeed(-1, 0)
 
 	c.ticker = time.NewTicker(time.Second)
 	go func() {
