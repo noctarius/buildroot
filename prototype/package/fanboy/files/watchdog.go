@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+	"golang.org/x/sys/unix"
+	"github.com/labstack/gommon/log"
 )
 
 func prepareWatchdog(watchdogFile string) *watchdog {
@@ -30,8 +32,8 @@ type watchdog struct {
 }
 
 func (w *watchdog) start() {
-	pingData := []byte("P")
 	closeData := []byte("V")
+	unix.IoctlSetInt(int(w.watchdogFile.Fd()), unix.WDIOC_KEEPALIVE, 0)
 	go func() {
 		for {
 			msg := <-w.pingChannel
@@ -43,8 +45,8 @@ func (w *watchdog) start() {
 				return
 
 			case "ping":
-				w.watchdogFile.Write(pingData)
-				fmt.Println("Fanboy: Hardware watchdog pinged")
+				unix.IoctlSetInt(int(w.watchdogFile.Fd()), unix.WDIOC_KEEPALIVE, 0)
+				log.Debug("Fanboy: Hardware watchdog pinged")
 			}
 		}
 	}()

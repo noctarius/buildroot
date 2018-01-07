@@ -1,5 +1,15 @@
 #!/bin/sh
 
-/bin/gridfan -d /dev/ttyACM0 init
-/bin/gridfan -d /dev/ttyACM0 sync
-/bin/gridfan -d /dev/ttyACM0 set fans all speed off
+case "$1" in
+        start|"")
+                /bin/fanboy &
+                ;;
+        stop)
+		curl http://127.0.0.1/stop
+                 ;;
+        *)
+                echo "Usage: fanboy {start|stop}" >&2
+                exit 1
+                ;;
+esac
+

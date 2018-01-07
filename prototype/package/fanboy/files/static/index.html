@@ -1,0 +1,55 @@
+<html>
+<body>
+<div id="fans">
+    <div>Fan 1: <span id="fan1"></span></div>
+    <div>Fan 2: <span id="fan2"></span></div>
+    <div>Fan 3: <span id="fan3"></span></div>
+    <div>Fan 4: <span id="fan4"></span></div>
+    <div>Fan 5: <span id="fan5"></span></div>
+    <div>Fan 6: <span id="fan6"></span></div>
+</div>
+</body>
+<script type="application/javascript">
+    var host = window.location.hostname;
+    var socket = new WebSocket("ws://" + host + "/ws");
+
+    var fan1 = document.getElementById("fan1");
+    var fan2 = document.getElementById("fan2");
+    var fan3 = document.getElementById("fan3");
+    var fan4 = document.getElementById("fan4");
+    var fan5 = document.getElementById("fan5");
+    var fan6 = document.getElementById("fan6");
+
+    socket.onmessage = function (event) {
+        var data = JSON.parse(event.data);
+        for (i = 0; i < 6; i++) {
+            var string = stringify(data[i])
+
+            switch (i) {
+                case 0:
+                    fan1.innerHTML = string;
+                    break;
+                case 1:
+                    fan2.innerHTML = string;
+                    break;
+                case 2:
+                    fan3.innerHTML = string;
+                    break;
+                case 3:
+                    fan4.innerHTML = string;
+                    break;
+                case 4:
+                    fan5.innerHTML = string;
+                    break;
+                case 5:
+                    fan6.innerHTML = string;
+                    break;
+            }
+        }
+    };
+
+    function stringify(val) {
+        return "RPM: " + val.rpm + " (Volts: " + val.volts + ", Amps: " + val.amps + ", wattage: " + val.wattage;
+    }
+</script>
+</html>

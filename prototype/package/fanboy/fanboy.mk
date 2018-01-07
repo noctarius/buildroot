@@ -38,8 +38,8 @@ define FANBOY_INSTALL_TARGET_CMDS
   $(Q)$(call MESSAGE,"Installing Fanboy Go application")
   $(INSTALL) -m 0755 $(@D)/target/fanboy $(TARGET_DIR)/usr/bin
   mkdir -p $(TARGET_DIR)/var/fanboy
-  if [ -d "$(@D)/fanboy/static" ]; then \
-    cp -R $(@D)/fanboy/static/* $(TARGET_DIR)/var/fanboy; \
+  if [ -d "$(@D)/static" ]; then \
+    cp -R $(@D)/static/* $(TARGET_DIR)/var/fanboy; \
     chmod -R 0755 $(TARGET_DIR)/var/fanboy; fi
 endef
 

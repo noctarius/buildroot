@@ -5,10 +5,24 @@ import (
 	"fmt"
 	"strconv"
 	"net/http"
+	ctx "context"
+	"github.com/labstack/echo/middleware"
+	"golang.org/x/net/websocket"
+	"encoding/json"
+	"github.com/labstack/gommon/log"
 )
 
-func prepareServer(port int, communicator *communicator) *server {
+func prepareServer(port int, staticPath string, communicator *communicator) *server {
 	echo := ef.New()
+	server := &server{
+		echo: echo,
+		port: port,
+	}
+
+	echo.Use(middleware.Recover())
+
+	echo.Static("/", staticPath)
+
 	echo.GET("/fans", func(context ef.Context) error {
 		fans := communicator.fans()
 		return context.JSON(http.StatusOK, fans)
@@ -87,20 +101,59 @@ func prepareServer(port int, communicator *communicator) *server {
 		return context.String(http.StatusOK, "success")
 	})
 
-	return &server{
-		echo:         echo,
-		port:         port,
-	}
+	echo.GET("/stop", func(context ef.Context) error {
+		server.quit <- "fin"
+		return context.String(http.StatusOK, "Going down master :)")
+	})
+
+	echo.GET("/ws", func(context ef.Context) error {
+		websocket.Handler(func(connection *websocket.Conn) {
+			regId := 0
+			notifier := func(fans []*Fan) {
+				val, err := json.Marshal(fans)
+				if err != nil {
+					log.Warn(err)
+				}
+				err = websocket.Message.Send(connection, string(val))
+				if err != nil {
+					log.Warn(err)
+					communicator.notifiers = append(communicator.notifiers[:regId], communicator.notifiers[regId+1:]...)
+					connection.Close()
+				}
+			}
+			communicator.notifiers = append(communicator.notifiers, notifier)
+			regId = len(communicator.notifiers) - 1
+
+			for {
+				var msg string
+				err := websocket.Message.Receive(connection, &msg)
+				if err != nil {
+					log.Warn(err)
+					communicator.notifiers = append(communicator.notifiers[:regId], communicator.notifiers[regId+1:]...)
+					connection.Close()
+				}
+			}
+		}).ServeHTTP(context.Response(), context.Request())
+		return nil
+	})
+
+	return server
 }
 
 type server struct {
-	echo         *ef.Echo
-	port         int
+	echo *ef.Echo
+	port int
+	quit chan string
 }
 
-func (s *server) start() {
+func (s *server) start(quit chan string) {
+	s.quit = quit
 	err := s.echo.Start(fmt.Sprintf(":%d", s.port))
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (s *server) stop(context ctx.Context) {
+	s.echo.Shutdown(context)
 }

@@ -3,19 +3,22 @@ package main
 import (
 	"fmt"
 	"gopkg.in/ini.v1"
-	"github.com/jacobsa/go-serial/serial"
+	"context"
+	"time"
+	"github.com/tarm/serial"
 )
 
 const (
-	default_tty_file        = "/dev/ttyACM0"
-	default_tty_baud_rate   = uint(4800)
-	default_tty_data_bits   = uint(8)
-	default_tty_stop_bits   = uint(1)
-	default_tty_parity_mode = serial.PARITY_NONE
+	default_tty_file        = "/dev/ttyACM*"
+	default_tty_baud_rate   = 4800
+	default_tty_data_bits   = 8
+	default_tty_stop_bits   = 1
+	default_tty_parity_mode = serial.ParityNone
 
 	default_watchdog_file = "/dev/watchdog0"
 
 	default_server_port = 80
+	default_server_static_path = "/var/fanboy"
 )
 
 func main() {
@@ -54,20 +57,17 @@ func main() {
 	ttyFile := key.MustString(default_tty_file)
 
 	key = section.Key("baud_rate")
-	baudRate := key.MustUint(default_tty_baud_rate)
+	baudRate := key.MustInt(default_tty_baud_rate)
 
 	key = section.Key("data_bits")
-	dataBits := key.MustUint(default_tty_data_bits)
+	dataBits := byte(key.MustInt(default_tty_data_bits))
 
 	key = section.Key("stop_bits")
-	stopBits := key.MustUint(default_tty_stop_bits)
+	stopBits := serial.StopBits(key.MustInt(default_tty_stop_bits))
 
 	fmt.Println("done.")
 
-	fmt.Printf("Fanboy: Opening communicator with serial port %s... ", ttyFile)
 	communicator := prepareCommunicator(ttyFile, baudRate, dataBits, stopBits, default_tty_parity_mode)
-	fmt.Println("done.")
-	communicator.start()
 
 	fmt.Print("Fanboy: Preparing webserver... ")
 	section, err = config.NewSection("server")
@@ -75,9 +75,35 @@ func main() {
 	key = section.Key("port")
 	port := key.MustInt(default_server_port)
 
-	server := prepareServer(port, communicator)
+	key = section.Key("static_path")
+	staticPath := key.MustString(default_server_static_path)
+
+	server := prepareServer(port, staticPath, communicator)
 	fmt.Println("done.")
 
-	fmt.Println("Fanboy: Serving api.")
-	go server.start()
+	fmt.Print("Fanboy: Serving api... ")
+	quit := make(chan string)
+	go server.start(quit)
+	fmt.Println("done.")
+
+	communicator.start()
+
+	<-quit
+
+	fmt.Println("Fanboy: Going down master :)")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	fmt.Print("Fanboy: Stoping communicator... ")
+	communicator.stop()
+	fmt.Println("done.")
+
+	fmt.Print("Fanboy: Stopping server...")
+	server.stop(ctx)
+	<-ctx.Done()
+	fmt.Println("done.")
+
+	fmt.Print("Fanboy: Stoping watchdog... ")
+	watchdog.stop()
+	fmt.Println("done.")
 }
