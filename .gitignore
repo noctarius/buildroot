@@ -13,3 +13,7 @@
 *.rej
 *~
 *.pyc
+prototype/package/fanboy/files/target/
+prototype/package/fanboy/files/bin
+prototype/package/fanboy/files/vendor/pkg
+prototype/package/fanboy/files/.idea/

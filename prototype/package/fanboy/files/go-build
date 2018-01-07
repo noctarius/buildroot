@@ -24,8 +24,8 @@ detect_os() {
 }
 
 execute() {
-  echo "Executing: $2"
   echo
+  echo "Executing: $2"
   echo -n "$1  "
   cmd="$2"
   if [ "$VERBOSE" == false ]; then
@@ -37,7 +37,7 @@ execute() {
       echo "Restart the command in verbose mode: $BOOTSTRAP_COMMAND -v"
       exit 1
     fi
-    printf "\bdone."
+    printf "\bdone.\n"
 
   else
     echo
@@ -51,7 +51,7 @@ execute() {
 
 LD_FLAGS="-ldflags=\"-s -w\""
 SRC_PATH="$PWD"
-P_PATH="$SRC_PATH/deps/vendor"
+P_PATH="$SRC_PATH/vendor"
 
 PACK=true
 VERBOSE=false
@@ -68,6 +68,7 @@ OS=$(detect_os)
 OUT="fanboy"
 TARGET="$PWD/target"
 TAGS=""
+GO_EXECUTABLE="go"
 
 BOOTSTRAP_COMMAND="$0 $@"
 
@@ -87,6 +88,7 @@ for arg in "$@"; do
       echo -e "-t|--target\033[3m[=]directory\033[0m\t\t\tSelect the output directory of the compilation"
       echo -e "-c|--clean\t\t\t\tCleans the target directory before compilation"
       echo -e "-cp|--clean-deps\t\t\tCleans the dependency directory before compilation (enforces re-download)"
+      echo -e "--go\033[3m[=]path/to/go\033[0m\t\t\tProvides a path to an alternative go executable to be used"
       exit 0
       ;;
     --debug|-d )
@@ -147,6 +149,13 @@ for arg in "$@"; do
     --release )
       TAGS="$TAGS -release"
       ;;
+    --go=* )
+      GO_EXECUTABLE=`echo $arg | sed 's/[-a-zA-Z0-9]*=//'`
+      ;;
+    --go )
+      GO_EXECUTABLE="${params[$i]}"
+      shift
+      ;;
   esac
   ((i++))
 done
@@ -178,9 +187,9 @@ if [ "CLEAN_DEPS" == true ]; then
   execute "Cleaning dependencies..." "rm -rf $P_PATH"
 fi
 
-execute "Updating dependencies..." "CGO_ENABLED=1 GOPATH=$P_PATH:$SRC_PATH GOARCH=$ARCH GOOS=$OS go get $BTAGS -v -d ./..."
+execute "Updating dependencies..." "CGO_ENABLED=1 GOPATH=$P_PATH:$SRC_PATH GOARCH=$ARCH GOOS=$OS $GO_EXECUTABLE get $BTAGS -v -d ./..."
 
-execute "Compiling..." "cd src && CGO_ENABLED=1 $CGO_LIBS $CGO_HEADERS GOPATH=$P_PATH:$SRC_PATH GOARCH=$ARCH GOOS=$OS $ARCH_OPTS go build -o $BUILD $C_OPTS $BTAGS"
+execute "Compiling..." "CGO_ENABLED=1 $CGO_LIBS $CGO_HEADERS GOPATH=$P_PATH:$SRC_PATH GOARCH=$ARCH GOOS=$OS $ARCH_OPTS $GO_EXECUTABLE build -o $BUILD $C_OPTS $BTAGS"
 
 if [ "$PACK" == true ]; then
   execute "Compressing..." "upx $P_OPTS $BUILD"
