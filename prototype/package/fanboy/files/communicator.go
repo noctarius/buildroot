@@ -11,6 +11,8 @@ import (
 	"strings"
 	"path/filepath"
 	"os"
+	"encoding/hex"
+	"container/list"
 )
 
 func prepareCommunicator(ttyFile string, baudRate int, dataBits byte,
@@ -37,20 +39,21 @@ func prepareCommunicator(ttyFile string, baudRate int, dataBits byte,
 		pFans:     fans,
 		channel:   make(chan comm_msg),
 		ticker:    time.NewTicker(time.Second * 1),
-		notifiers: make([]updateNotifier, 0),
+		notifiers: list.New(),
 	}
 }
 
 type updateNotifier func(fans []*Fan)
 
 type communicator struct {
-	ttyFile   string
-	options   *serial.Config
-	port      io.ReadWriteCloser
-	pFans     []*Fan
-	channel   chan comm_msg
-	ticker    *time.Ticker
-	notifiers []updateNotifier
+	ttyFile    string
+	options    *serial.Config
+	port       io.ReadWriteCloser
+	pFans      []*Fan
+	channel    chan comm_msg
+	ticker     *time.Ticker
+	notifiers  *list.List
+	lastUpdate int64
 }
 
 type comm_msg_type int
@@ -67,13 +70,25 @@ type comm_msg struct {
 	value   int
 }
 
+func (c *communicator) fans() []*Fan {
+	return c.pFans
+}
+
+func (c *communicator) addListener(notifier updateNotifier) *list.Element {
+	return c.notifiers.PushBack(notifier)
+}
+
+func (c *communicator) removeListener(registration *list.Element) {
+	c.notifiers.Remove(registration)
+}
+
 func (c *communicator) start() {
 	go func() {
 		for {
 			msg := <-c.channel
 			switch msg.msgType {
 			case comm_msg_type_read:
-				c.updateFans()
+				c.__updateFans()
 
 			case comm_msg_type_write:
 				c.__changeSpeed(msg.fanId, msg.value)
@@ -84,6 +99,7 @@ func (c *communicator) start() {
 		}
 	}()
 
+	c.__sync()
 	c.setSpeed(-1, 0)
 
 	go func() {
@@ -96,9 +112,17 @@ func (c *communicator) start() {
 	}()
 }
 
-func (c *communicator) write(data []byte, expectedBytes, timeoutMillis int) ([]byte, error) {
+func (c *communicator) stop() {
+	c.ticker.Stop()
+	c.channel <- comm_msg{
+		msgType: comm_msg_type_close,
+	}
+	c.port.Close()
+}
+
+func (c *communicator) __write(data []byte, expectedBytes, timeoutMillis int) ([]byte, error) {
 	if c.port == nil {
-		if err := c.init(); err != nil {
+		if err := c.__resync(); err != nil {
 			panic(err)
 		}
 	}
@@ -107,8 +131,12 @@ func (c *communicator) write(data []byte, expectedBytes, timeoutMillis int) ([]b
 		return nil, err
 	}
 
+	return c.__read(expectedBytes, timeoutMillis)
+}
+
+func (c *communicator) __read(expectedBytes, timeoutMillis int) ([]byte, error) {
 	timeout := (time.Millisecond * time.Duration(timeoutMillis)).Nanoseconds()
-	deadline := int64(time.Now().Nanosecond()) + timeout
+	deadline := int64(time.Now().UnixNano()) + timeout
 
 	buf := make([]byte, expectedBytes)
 	read := 0
@@ -129,9 +157,7 @@ func (c *communicator) write(data []byte, expectedBytes, timeoutMillis int) ([]b
 			}
 		}
 
-		if int64(time.Now().Nanosecond()) > deadline {
-			c.port.Close()
-			c.port = nil
+		if int64(time.Now().UnixNano()) > deadline {
 			return nil, errors.New("update deadline reached, connection closed")
 		}
 	}
@@ -139,13 +165,13 @@ func (c *communicator) write(data []byte, expectedBytes, timeoutMillis int) ([]b
 	return buf, nil
 }
 
-func (c *communicator) safeWrite(data []byte, expectedBytes, timeoutMillis int) ([]byte, error) {
+func (c *communicator) __safeWrite(data []byte, expectedBytes, timeoutMillis int) ([]byte, error) {
 	for i := 0; i < 5; i++ {
-		response, err := c.write(data, expectedBytes, timeoutMillis)
+		response, err := c.__write(data, expectedBytes, timeoutMillis)
 		if err != nil {
 			log.Warn(err)
-			c.port.Close()
-			c.port = nil
+			log.Warnf("Encoded data written to connection: %s", hex.EncodeToString(data))
+			c.__resync()
 			time.Sleep(time.Millisecond * 500)
 			continue
 		}
@@ -154,15 +180,7 @@ func (c *communicator) safeWrite(data []byte, expectedBytes, timeoutMillis int) 
 	return nil, errors.New("couldn't communicate to Grid+")
 }
 
-func (c *communicator) stop() {
-	c.ticker.Stop()
-	c.channel <- comm_msg{
-		msgType: comm_msg_type_close,
-	}
-	c.port.Close()
-}
-
-func (c *communicator) searchPortByPattern() {
+func (c *communicator) __searchPortByPattern() {
 	if !strings.Contains(c.ttyFile, "*") {
 		c.options.Name = c.ttyFile
 
@@ -185,13 +203,25 @@ func (c *communicator) searchPortByPattern() {
 		c.options.Name = c.ttyFile
 	}
 }
-func (c *communicator) connect() error {
+func (c *communicator) __connect() error {
 	fmt.Printf("Fanboy: Opening communicator with serial port %s... ", c.ttyFile)
+	if err := c.__connect0(); err != nil {
+		return err
+	}
+	fmt.Println("done.")
+	return nil
+}
+
+func (c *communicator) __connect0() error {
 	for i := 0; i < 20; i++ {
-		c.searchPortByPattern()
-		fmt.Printf("interface: %s... ", c.options.Name)
+		c.__searchPortByPattern()
+		// fmt.Printf("interface: %s... ", c.options.Name)
 		port, err := serial.OpenPort(c.options)
 		if err != nil {
+			if i == 19 {
+				return err
+			}
+
 			log.Warn(err)
 			fmt.Print(".")
 			time.Sleep(time.Second * 5)
@@ -200,35 +230,84 @@ func (c *communicator) connect() error {
 		c.port = port
 		break
 	}
-	fmt.Println("done.")
 	return nil
 }
 
-func (c *communicator) init() error {
-	if err := c.connect(); err != nil {
-		return err
-	}
-
+func (c *communicator) __sync() error {
 	fmt.Print("Fanboy: Initialize Grid+ communication...")
-	for {
-		response, _ := c.write([]byte{0xC0}, 1, 1000)
-		if response[0] == 0x21 {
-			break
-		}
-		time.Sleep(time.Millisecond * 50)
-		fmt.Print(".")
-	}
+	c.__resync()
 	fmt.Println(" done.")
 	return nil
 }
 
-func (c *communicator) updateFans() {
-	//fmt.Print("Fanboy: Triggered fans update... ")
-	for i := 0; i < 6; i++ {
-		c.pFans[i].update(c)
+func (c *communicator) __resync() error {
+	retry := 0
+	for {
+		if c.port == nil {
+			if err := c.__connect0(); err != nil {
+				return err
+			}
+		}
+
+		response, err := c.__write([]byte{0xC0}, 1, 1000)
+		if err != nil {
+			time.Sleep(time.Millisecond * 50)
+			if retry == 10 {
+				fmt.Print(":")
+				c.__close0()
+				retry = 0
+			} else {
+				fmt.Print(".")
+			}
+			retry++
+			continue
+		}
+
+		if response[0] == 0x21 {
+			break
+		} else if response[0] == 0x2 {
+			// reconnect please
+			c.__close0()
+		} else {
+			fmt.Printf("0x%X", response[0])
+		}
+		retry++
 	}
-	//fmt.Println("done.")
-	for _, notifier := range c.notifiers {
+	time.Sleep(time.Millisecond * 50)
+	fmt.Print("*")
+
+	// clean inbound queue
+	for i := 0; i < 5; i++ {
+		c.__read(0, 100)
+	}
+	return nil
+}
+
+func (c *communicator) __close() {
+	// fmt.Println(string(debug.Stack()))
+	fmt.Print("Fanboy: Closing Grid+ connection... ")
+	c.__close0()
+	fmt.Println("done.")
+}
+
+func (c *communicator) __close0() {
+	c.port.Close()
+	c.port = nil
+}
+
+func (c *communicator) __updateFans() {
+	// Prevent overloading the Grid+ right after resyncing
+	currentTime := time.Now().UnixNano()
+	if currentTime-c.lastUpdate < time.Second.Nanoseconds() {
+		return
+	}
+	c.lastUpdate = currentTime
+
+	for i := 0; i < 6; i++ {
+		c.pFans[i].__update(c)
+	}
+	for e := c.notifiers.Front(); e != nil; e = e.Next() {
+		notifier := e.Value.(updateNotifier)
 		notifier(c.pFans)
 	}
 }
@@ -245,21 +324,14 @@ func (c *communicator) __changeSpeed(id, percentage int) {
 	if id > 0 {
 		fmt.Printf("Fanboy: Triggered Fan %d speed update %d%%... ", id, percentage)
 
-		c.pFans[id].speed(percentage, c)
+		c.pFans[id].__speed(percentage, c)
 		fmt.Println("done.")
 		return
 	}
 
-	//fmt.Printf("Fanboy: Triggered fans speed update %d%%... ", percentage)
 	for i := 0; i < 6; i++ {
-		//fmt.Printf("Fan %d... ", i+1)
-		c.pFans[i].speed(percentage, c)
+		c.pFans[i].__speed(percentage, c)
 	}
-	//fmt.Println("done.")
-}
-
-func (c *communicator) fans() []*Fan {
-	return c.pFans
 }
 
 type Fan struct {
@@ -270,10 +342,9 @@ type Fan struct {
 	Wattage float32 `json:"wattage"`
 }
 
-func (f *Fan) update(communicator *communicator) {
-	//fmt.Printf("Fan %d", f.Id)
+func (f *Fan) __update(communicator *communicator) {
 	data := []byte{0x84, f.Id}
-	response, err := communicator.safeWrite(data, 5, 500)
+	response, err := communicator.__safeWrite(data, 5, 1000)
 	if err != nil {
 		panic(err)
 	}
@@ -281,10 +352,9 @@ func (f *Fan) update(communicator *communicator) {
 		log.Warn(errors.New("invalid response"))
 	}
 	f.Volts = float32(response[3]) + (0.1 * float32(response[4]))
-	//fmt.Print(".")
 
 	data[0] = 0x85
-	response, err = communicator.safeWrite(data, 5, 500)
+	response, err = communicator.__safeWrite(data, 5, 1000)
 	if err != nil {
 		panic(err)
 	}
@@ -293,10 +363,9 @@ func (f *Fan) update(communicator *communicator) {
 	}
 	f.Amps = float32(response[3]) + (0.1 * float32(response[4]))
 	f.Wattage = f.Volts * f.Amps
-	//fmt.Print(".")
 
 	data[0] = 0x8A
-	response, err = communicator.safeWrite(data, 5, 500)
+	response, err = communicator.__safeWrite(data, 5, 1000)
 	if err != nil {
 		panic(err)
 	}
@@ -304,20 +373,19 @@ func (f *Fan) update(communicator *communicator) {
 		log.Warn(errors.New("invalid response"))
 	}
 	f.Rpm = (uint(response[3]) * 256) + uint(response[4])
-	//fmt.Print(". ")
 }
 
-func (f *Fan) speed(speed int, communicator *communicator) bool {
-	volts := calcVolts(speed)
+func (f *Fan) __speed(speed int, communicator *communicator) bool {
+	volts := f.__calcVolts(speed)
 	data := []byte{0x44, f.Id, 0xC0, 0x00, 0x00, volts[0], volts[1]}
-	response, err := communicator.safeWrite(data, 1, 500)
+	response, err := communicator.__safeWrite(data, 1, 1000)
 	if err != nil {
 		panic(err)
 	}
 	return response[0] == 0x01
 }
 
-func calcVolts(speed int) []byte {
+func (f *Fan) __calcVolts(speed int) []byte {
 	volts := float64(speed) / 100.0 * 12.0
 	inc, dec := math.Modf(volts)
 	v1 := byte(inc)

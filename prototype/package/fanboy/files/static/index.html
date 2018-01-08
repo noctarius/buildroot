@@ -1,55 +1,160 @@
 <html>
+<head>
+    <script type="application/javascript" src="gauge.js"></script>
+    <style type="text/css">
+        .slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 15px;
+            border-radius: 5px;
+            background: #d3d3d3;
+            outline: none;
+            opacity: 0.7;
+            -webkit-transition: .2s;
+            transition: opacity .2s;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+        }
+
+        .slider::-moz-range-thumb {
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+        }    </style>
+</head>
 <body>
 <div id="fans">
-    <div>Fan 1: <span id="fan1"></span></div>
-    <div>Fan 2: <span id="fan2"></span></div>
-    <div>Fan 3: <span id="fan3"></span></div>
-    <div>Fan 4: <span id="fan4"></span></div>
-    <div>Fan 5: <span id="fan5"></span></div>
-    <div>Fan 6: <span id="fan6"></span></div>
+    <table>
+        <tr>
+            <td colspan="3">
+                <input type="range" min="0" max="100" value="50" class="slider" id="fanspeed" step="5">
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div>
+                    <canvas id="fan1"></canvas>
+                </div>
+            </td>
+            <td>
+                <div>
+                    <canvas id="fan2"></canvas>
+                </div>
+            </td>
+            <td>
+                <div>
+                    <canvas id="fan3"></canvas>
+                </div>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div>
+                    <canvas id="fan4"></canvas>
+                </div>
+            </td>
+            <td>
+                <div>
+                    <canvas id="fan5"></canvas>
+                </div>
+            </td>
+            <td>
+                <div>
+                    <canvas id="fan6"></canvas>
+                </div>
+            </td>
+        </tr>
+    </table>
 </div>
 </body>
-<script type="application/javascript">
-    var host = window.location.hostname;
-    var socket = new WebSocket("ws://" + host + "/ws");
-
-    var fan1 = document.getElementById("fan1");
-    var fan2 = document.getElementById("fan2");
-    var fan3 = document.getElementById("fan3");
-    var fan4 = document.getElementById("fan4");
-    var fan5 = document.getElementById("fan5");
-    var fan6 = document.getElementById("fan6");
-
-    socket.onmessage = function (event) {
-        var data = JSON.parse(event.data);
-        for (i = 0; i < 6; i++) {
-            var string = stringify(data[i])
-
-            switch (i) {
-                case 0:
-                    fan1.innerHTML = string;
-                    break;
-                case 1:
-                    fan2.innerHTML = string;
-                    break;
-                case 2:
-                    fan3.innerHTML = string;
-                    break;
-                case 3:
-                    fan4.innerHTML = string;
-                    break;
-                case 4:
-                    fan5.innerHTML = string;
-                    break;
-                case 5:
-                    fan6.innerHTML = string;
-                    break;
-            }
+<script>
+    var opts = {
+        angle: 0.35, // The span of the gauge arc
+        lineWidth: 0.1, // The line thickness
+        radiusScale: 1, // Relative radius
+        pointer: {
+            length: 0.6, // // Relative to gauge radius
+            strokeWidth: 0.035, // The thickness
+            color: '#000000' // Fill color
+        },
+        limitMax: false,     // If false, max value increases automatically if value > maxValue
+        limitMin: false,     // If true, the min value of the gauge will be fixed
+        colorStart: '#6F6EA0',   // Colors
+        colorStop: '#C0C0DB',    // just experiment with them
+        strokeColor: '#EEEEEE',  // to see which ones work best for you
+        generateGradient: true,
+        highDpiSupport: true,     // High resolution support
+        staticLabels: {
+            font: "10px sans-serif",  // Specifies font
+            labels: [100, 130, 150, 220.1, 260, 300],  // Print labels at these values
+            color: "#000000",  // Optional: Label text color
+            fractionDigits: 0  // Optional: Numerical precision. 0=round off.
         }
     };
 
-    function stringify(val) {
-        return "RPM: " + val.rpm + " (Volts: " + val.volts + ", Amps: " + val.amps + ", wattage: " + val.wattage;
+    function createFan(name) {
+        var canvas = document.getElementById(name);
+        var fan = new Donut(canvas).setOptions(opts); // create sexy gauge!
+        fan.maxValue = 2100;
+        fan.minValue = 0;
+        fan.set(0);
+        //var text = document.getElementById(name + "-text");
+        //fan.setTextField(text);
+        return fan;
     }
+
+    var gauges = [
+        createFan("fan1"),
+        createFan("fan2"),
+        createFan("fan3"),
+        createFan("fan4"),
+        createFan("fan5"),
+        createFan("fan6")
+    ];
+</script>
+<script type="application/javascript">
+    function connect() {
+        var host = window.location.host;
+        var socket = new WebSocket("ws://" + host + "/ws");
+        socket.onmessage = function (event) {
+            var data = JSON.parse(event.data);
+            for (var i = 0; i < 6; i++) {
+                window.gauges[i].set(data[i].rpm);
+            }
+        };
+        socket.onclose = function (event) {
+            window.setTimeout(function (e) {
+                console.log("Reconnecting...");
+                connect();
+            }, 5000);
+        };
+
+        var fanspeed = document.getElementById("fanspeed");
+        fanspeed.onchange = function (event) {
+            var val = event.target.value;
+            if (val != 0 && val < 45) {
+                val = 45;
+                event.target.value = 45;
+            }
+
+            socket.send(JSON.stringify({
+                cmd: "setspeed",
+                fanid: -1,
+                speed: "" + val
+            }))
+        }
+    }
+
+    connect();
 </script>
 </html>

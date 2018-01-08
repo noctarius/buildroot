@@ -4,16 +4,11 @@ import (
 	"fmt"
 	"os"
 	"time"
-	"golang.org/x/sys/unix"
 	"github.com/labstack/gommon/log"
 )
 
 func prepareWatchdog(watchdogFile string) *watchdog {
-	if _, err := os.Stat(watchdogFile); err != nil {
-		panic(err)
-	}
-
-	file, err := os.Open(watchdogFile)
+	file, err := __watchdog_open(watchdogFile)
 	if err != nil {
 		panic(err)
 	}
@@ -32,20 +27,18 @@ type watchdog struct {
 }
 
 func (w *watchdog) start() {
-	closeData := []byte("V")
-	unix.IoctlSetInt(int(w.watchdogFile.Fd()), unix.WDIOC_KEEPALIVE, 0)
+	w.__ping()
 	go func() {
 		for {
 			msg := <-w.pingChannel
 			switch msg {
 			case "fin":
-				w.watchdogFile.Write(closeData)
-				w.watchdogFile.Close()
+				w.__close(true)
 				fmt.Println("Fanboy: Hardware watchdog closed")
 				return
 
 			case "ping":
-				unix.IoctlSetInt(int(w.watchdogFile.Fd()), unix.WDIOC_KEEPALIVE, 0)
+				w.__ping()
 				log.Debug("Fanboy: Hardware watchdog pinged")
 			}
 		}

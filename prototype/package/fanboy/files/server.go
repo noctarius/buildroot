@@ -10,6 +10,8 @@ import (
 	"golang.org/x/net/websocket"
 	"encoding/json"
 	"github.com/labstack/gommon/log"
+	"container/list"
+	"io"
 )
 
 func prepareServer(port int, staticPath string, communicator *communicator) *server {
@@ -108,7 +110,7 @@ func prepareServer(port int, staticPath string, communicator *communicator) *ser
 
 	echo.GET("/ws", func(context ef.Context) error {
 		websocket.Handler(func(connection *websocket.Conn) {
-			regId := 0
+			var registration *list.Element
 			notifier := func(fans []*Fan) {
 				val, err := json.Marshal(fans)
 				if err != nil {
@@ -117,20 +119,47 @@ func prepareServer(port int, staticPath string, communicator *communicator) *ser
 				err = websocket.Message.Send(connection, string(val))
 				if err != nil {
 					log.Warn(err)
-					communicator.notifiers = append(communicator.notifiers[:regId], communicator.notifiers[regId+1:]...)
+					if registration != nil {
+						communicator.removeListener(registration)
+					}
 					connection.Close()
 				}
 			}
-			communicator.notifiers = append(communicator.notifiers, notifier)
-			regId = len(communicator.notifiers) - 1
+			registration = communicator.addListener(notifier)
 
 			for {
 				var msg string
 				err := websocket.Message.Receive(connection, &msg)
-				if err != nil {
+				if err != nil && err != io.EOF {
 					log.Warn(err)
-					communicator.notifiers = append(communicator.notifiers[:regId], communicator.notifiers[regId+1:]...)
+					if registration != nil {
+						communicator.removeListener(registration)
+					}
 					connection.Close()
+					break
+				}
+				if msg != "" {
+					var data map[string]interface{}
+					json.Unmarshal([]byte(msg), &data)
+					fmt.Println(msg)
+					fmt.Println(data)
+					if data["cmd"] == "setspeed" {
+						sspeed := data["speed"].(string)
+						speed, err := strconv.Atoi(sspeed)
+						if err != nil {
+							speed = 45
+						}
+
+						if speed < 0 {
+							speed = 45
+						}
+
+						if speed > 100 {
+							speed = 100
+						}
+
+						communicator.setSpeed(-1, speed)
+					}
 				}
 			}
 		}).ServeHTTP(context.Response(), context.Request())

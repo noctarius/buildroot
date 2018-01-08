@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 	"github.com/tarm/serial"
+	"flag"
 )
 
 const (
@@ -17,11 +18,20 @@ const (
 
 	default_watchdog_file = "/dev/watchdog0"
 
-	default_server_port = 80
+	default_server_port        = 80
 	default_server_static_path = "/var/fanboy"
 )
 
 func main() {
+	overrideTtyFile := flag.String("tty-file", default_tty_file, "--tty-file=/path/to/tty")
+
+	disableWatchdog := flag.Bool("disable-watchdog", false, "--disable-watchdog")
+
+	serverStaticPath := flag.String("server-static-path", default_server_static_path, "--server-static-path=/path/to/static/files")
+	serverPort := flag.Int("server-port", default_server_port, "--server-port=80")
+
+	flag.Parse()
+
 	fmt.Print("Fanboy: Loading configuration... ")
 	options := ini.LoadOptions{
 		AllowBooleanKeys:    true,
@@ -34,27 +44,33 @@ func main() {
 		panic(err)
 	}
 
-	section, err := config.NewSection("watchdog")
-	if err != nil {
-		panic(err)
+	var watchdog *watchdog
+	if !*disableWatchdog {
+		section, err := config.NewSection("watchdog")
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("done.")
+
+		fmt.Print("Fanboy: Readying hardware watchdog... ")
+		key := section.Key("file")
+
+		watchdog = prepareWatchdog(key.MustString(default_watchdog_file))
+		watchdog.start()
+		fmt.Println("done.")
 	}
-	fmt.Println("done.")
-
-	fmt.Print("Fanboy: Readying hardware watchdog... ")
-	key := section.Key("file")
-
-	watchdog := prepareWatchdog(key.MustString(default_watchdog_file))
-	watchdog.start()
-	fmt.Println("done.")
 
 	fmt.Print("Fanboy: Reading serial port configuration... ")
-	section, err = config.NewSection("tty")
+	section, err := config.NewSection("tty")
 	if err != nil {
 		panic(err)
 	}
 
-	key = section.Key("file")
+	key := section.Key("file")
 	ttyFile := key.MustString(default_tty_file)
+	if *overrideTtyFile != default_tty_file {
+		ttyFile = *overrideTtyFile
+	}
 
 	key = section.Key("baud_rate")
 	baudRate := key.MustInt(default_tty_baud_rate)
@@ -74,17 +90,22 @@ func main() {
 
 	key = section.Key("port")
 	port := key.MustInt(default_server_port)
+	if *serverPort != default_server_port {
+		port = *serverPort
+	}
 
 	key = section.Key("static_path")
 	staticPath := key.MustString(default_server_static_path)
+	if *serverStaticPath != default_server_static_path {
+		staticPath = *serverStaticPath
+	}
 
 	server := prepareServer(port, staticPath, communicator)
 	fmt.Println("done.")
 
-	fmt.Print("Fanboy: Serving api... ")
+	fmt.Println("Fanboy: Serving api... ")
 	quit := make(chan string)
 	go server.start(quit)
-	fmt.Println("done.")
 
 	communicator.start()
 
@@ -103,7 +124,9 @@ func main() {
 	<-ctx.Done()
 	fmt.Println("done.")
 
-	fmt.Print("Fanboy: Stoping watchdog... ")
-	watchdog.stop()
-	fmt.Println("done.")
+	if !*disableWatchdog {
+		fmt.Print("Fanboy: Stoping watchdog... ")
+		watchdog.stop()
+		fmt.Println("done.")
+	}
 }
