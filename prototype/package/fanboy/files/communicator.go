@@ -249,7 +249,7 @@ func (c *communicator) __resync() error {
 			}
 		}
 
-		response, err := c.__write([]byte{0xC0}, 1, 1000)
+		response, err := c.__write([]byte{0xC0}, 1, 200)
 		if err != nil {
 			time.Sleep(time.Millisecond * 50)
 			if retry == 10 {
@@ -274,7 +274,7 @@ func (c *communicator) __resync() error {
 		retry++
 	}
 	time.Sleep(time.Millisecond * 50)
-	fmt.Print("*")
+	fmt.Println("*")
 
 	// clean inbound queue
 	for i := 0; i < 5; i++ {
