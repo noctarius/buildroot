@@ -343,36 +343,61 @@ type Fan struct {
 }
 
 func (f *Fan) __update(communicator *communicator) {
-	data := []byte{0x84, f.Id}
-	response, err := communicator.__safeWrite(data, 5, 1000)
-	if err != nil {
-		panic(err)
-	}
-	if response[0] != 0xC0 {
-		log.Warn(errors.New("invalid response"))
-	}
-	f.Volts = float32(response[3]) + (0.1 * float32(response[4]))
-
-	data[0] = 0x85
-	response, err = communicator.__safeWrite(data, 5, 1000)
-	if err != nil {
-		panic(err)
-	}
-	if response[0] != 0xC0 {
-		log.Warn(errors.New("invalid response"))
-	}
-	f.Amps = float32(response[3]) + (0.1 * float32(response[4]))
+	f.__updateVolts(communicator)
+	f.__updateAmps(communicator)
+	f.__updateRpm(communicator)
 	f.Wattage = f.Volts * f.Amps
+}
 
-	data[0] = 0x8A
-	response, err = communicator.__safeWrite(data, 5, 1000)
-	if err != nil {
-		panic(err)
+func (f *Fan) __updateVolts(communicator *communicator) {
+	for {
+		data := []byte{0x84, f.Id}
+		response, err := communicator.__safeWrite(data, 5, 1000)
+		if err != nil {
+			panic(err)
+		}
+		if response[0] != 0xC0 || response[1] != 0x00 || response[2] != 0x00 {
+			log.Warn(errors.New("invalid response for volts request"))
+			communicator.__resync()
+			continue
+		}
+		f.Volts = float32(response[3]) + (0.1 * float32(response[4]))
+		break
 	}
-	if response[0] != 0xC0 {
-		log.Warn(errors.New("invalid response"))
+}
+
+func (f *Fan) __updateAmps(communicator *communicator) {
+	for {
+		data := []byte{0x85, f.Id}
+		response, err := communicator.__safeWrite(data, 5, 1000)
+		if err != nil {
+			panic(err)
+		}
+		if response[0] != 0xC0 || response[1] != 0x00 || response[2] != 0x00 {
+			log.Warn(errors.New("invalid response for amps request"))
+			communicator.__resync()
+			continue
+		}
+		f.Amps = float32(response[3]) + (0.1 * float32(response[4]))
+		break
 	}
-	f.Rpm = (uint(response[3]) * 256) + uint(response[4])
+}
+
+func (f *Fan) __updateRpm(communicator *communicator) {
+	for {
+		data := []byte{0x8A, f.Id}
+		response, err := communicator.__safeWrite(data, 5, 1000)
+		if err != nil {
+			panic(err)
+		}
+		if response[0] != 0xC0 || response[1] != 0x00 || response[2] != 0x00 {
+			log.Warn(errors.New("invalid response for rpm request"))
+			communicator.__resync()
+			continue
+		}
+		f.Rpm = (uint(response[3]) * 256) + uint(response[4])
+		break
+	}
 }
 
 func (f *Fan) __speed(speed int, communicator *communicator) bool {

@@ -187,7 +187,7 @@ if [ "CLEAN_DEPS" == true ]; then
   execute "Cleaning dependencies..." "rm -rf $P_PATH"
 fi
 
-execute "Updating dependencies..." "CGO_ENABLED=1 GOPATH=$P_PATH:$SRC_PATH GOARCH=$ARCH GOOS=$OS $GO_EXECUTABLE get $BTAGS -v -d ./..."
+execute "Updating dependencies..." "CGO_ENABLED=1 GOPATH=$P_PATH:$SRC_PATH GOARCH=$ARCH GOOS=$OS $GO_EXECUTABLE get $BTAGS -v -d"
 
 execute "Compiling..." "CGO_ENABLED=1 $CGO_LIBS $CGO_HEADERS GOPATH=$P_PATH:$SRC_PATH GOARCH=$ARCH GOOS=$OS $ARCH_OPTS $GO_EXECUTABLE build -o $BUILD $C_OPTS $BTAGS"
 
